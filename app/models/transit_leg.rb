@@ -112,6 +112,11 @@ class TransitLeg
       skip_validations: true,
     )
 
+    # Create details post for flights (similar to schedule post for trains)
+    if attributes[:mode] == "flight" && attributes[:flight_details].present?
+      create_flight_details_post(topic, attributes)
+    end
+
     # Apply tags
     apply_tags(topic, attributes)
 
@@ -151,6 +156,90 @@ class TransitLeg
     end
 
     topic
+  end
+
+  def self.create_flight_details_post(topic, attributes)
+    # Check if details post already exists
+    existing_details_post = topic.posts.where(user_id: Discourse.system_user.id).where("post_number > 1").first
+    return if existing_details_post
+
+    details_content = build_flight_details_content(attributes)
+    PostCreator.create!(
+      Discourse.system_user,
+      topic_id: topic.id,
+      raw: details_content,
+      skip_validations: true,
+    )
+  end
+
+  def self.build_flight_details_content(attributes)
+    details = attributes[:flight_details]
+    return "" unless details
+
+    content = "## Flight Details\n\n"
+
+    # Airline info
+    if details[:airline_name].present?
+      airline_code = details[:airline_iata] ? " (#{details[:airline_iata]})" : ""
+      content += "**Airline:** #{details[:airline_name]}#{airline_code}\n"
+    end
+
+    # Status
+    if details[:flight_status].present?
+      content += "**Status:** #{details[:flight_status].capitalize}\n"
+    end
+
+    content += "\n### Departure - #{attributes[:origin_name]} (#{attributes[:origin]})\n"
+    content += "- **Gate:** #{attributes[:gate] || 'TBA'}\n" if attributes[:gate].present? || true
+    content += "- **Terminal:** #{attributes[:terminal]}\n" if attributes[:terminal].present?
+    content += "- **Scheduled:** #{attributes[:dep_sched_at]&.strftime('%H:%M UTC')}\n"
+    content += "- **Estimated:** #{attributes[:dep_est_at]&.strftime('%H:%M UTC')}\n"
+
+    if details[:departure_delay].present? && details[:departure_delay].to_i > 0
+      content += "- **Delay:** #{details[:departure_delay]} minutes\n"
+    end
+
+    if details[:departure_actual].present?
+      content += "- **Actual Departure:** #{details[:departure_actual].strftime('%H:%M UTC')}\n"
+    end
+
+    content += "\n### Arrival - #{attributes[:dest_name]} (#{attributes[:dest]})\n"
+    content += "- **Gate:** #{details[:arrival_gate] || 'TBA'}\n" if details[:arrival_gate].present? || true
+    content += "- **Baggage Claim:** #{details[:arrival_baggage]}\n" if details[:arrival_baggage].present?
+    content += "- **Scheduled:** #{attributes[:arr_sched_at]&.strftime('%H:%M UTC')}\n"
+    content += "- **Estimated:** #{attributes[:arr_est_at]&.strftime('%H:%M UTC')}\n" if attributes[:arr_est_at].present?
+
+    if details[:arrival_actual].present?
+      content += "- **Actual Arrival:** #{details[:arrival_actual].strftime('%H:%M UTC')}\n"
+    end
+
+    # Code-share info
+    if details[:codeshare_info].present?
+      codeshare = details[:codeshare_info]
+      operating_airline = codeshare["airline_name"]&.titleize || codeshare["airline_iata"]
+      operating_flight = codeshare["flight_iata"] || codeshare["flight_icao"]
+
+      content += "\n### Code-Share\n"
+      content += "This flight is operated by #{operating_airline} (#{operating_flight}).\n"
+
+      # Show all marketing carriers
+      all_flights = attributes[:route_short_name].split(" / ")
+      if all_flights.length > 1
+        content += "\nAlso sold as:\n"
+        all_flights.each do |flight_code|
+          content += "- #{flight_code}\n"
+        end
+      end
+    end
+
+    # Aircraft info
+    if details[:aircraft_registration].present?
+      content += "\n### Aircraft\n"
+      content += "**Registration:** #{details[:aircraft_registration]}\n"
+    end
+
+    content += "\n_All times in UTC. Information subject to change._"
+    content
   end
 
   private
@@ -221,8 +310,8 @@ class TransitLeg
     # Mode tag
     tags << attributes[:mode]&.downcase if attributes[:mode]
 
-    # Status tag
-    status = determine_status_from_attributes(attributes)
+    # Status tag: Use API status if provided (source of truth), otherwise infer from timing
+    status = attributes[:status] || determine_status_from_attributes(attributes)
     tags << "status:#{status}"
 
     # Route tag
@@ -253,6 +342,11 @@ class TransitLeg
 
   def self.delayed?(scheduled, estimated)
     return false unless scheduled && estimated
+
+    # Parse strings to Time objects if needed (custom fields store as strings)
+    scheduled = scheduled.is_a?(String) ? Time.parse(scheduled) : scheduled
+    estimated = estimated.is_a?(String) ? Time.parse(estimated) : estimated
+
     delay_seconds = (estimated - scheduled).to_i
     delay_seconds > SiteSetting.transit_tracker_delay_threshold_seconds
   end
