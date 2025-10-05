@@ -112,7 +112,7 @@
   overflow: hidden;
   box-shadow: inset 0 0.125rem 0.625rem rgba(0, 0, 0, 0.8);
   display: grid;
-  grid-template-columns: 6.5rem auto minmax(7rem, 1fr) 7.5rem 11rem 8.5rem;
+  grid-template-columns: 6.5rem auto minmax(7rem, 1fr) minmax(7rem, 1fr) 7.5rem 11rem 8.5rem;
   gap: 0;
 }
 
@@ -337,6 +337,33 @@
       background: linear-gradient(135deg, #34495e 0%, #2c3e50 100%);
       border-color: #5d6d7e;
     }
+  }
+}
+
+.col-origin {
+  flex-direction: column;
+  min-width: 0;
+
+  .origin-main {
+    font-size: 1.2rem;
+    font-weight: bold;
+    color: #ccc;
+    text-transform: uppercase;
+    letter-spacing: 0.0625rem;
+    font-family: "Arial", sans-serif;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .origin-code {
+    font-size: 1.1rem;
+    color: #999;
+    opacity: 0.9;
+    font-weight: 900;
+    letter-spacing: 0.125rem;
+    text-transform: uppercase;
+    margin-top: 0.25rem;
   }
 }
 
