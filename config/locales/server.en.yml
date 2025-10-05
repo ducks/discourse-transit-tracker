@@ -1,0 +1,12 @@
+en:
+  site_settings:
+    transit_tracker_enabled: "Enable Transit Tracker plugin"
+    transit_tracker_planes_category_id: "Category ID for Planes"
+    transit_tracker_trains_category_id: "Category ID for Trains"
+    transit_tracker_public_transit_category_id: "Category ID for Public Transit"
+    transit_tracker_golemio_api_token: "Golemio API token for Prague transit data"
+    transit_tracker_monitored_stops: "Comma-separated list of stop IDs to monitor"
+    transit_tracker_monitored_routes: "Comma-separated list of route IDs to monitor (optional)"
+    transit_tracker_polling_interval_minutes: "How often to poll for updates (minutes)"
+    transit_tracker_time_window_minutes: "Time window for upcoming departures (minutes)"
+    transit_tracker_delay_threshold_seconds: "Delay threshold to mark as delayed (seconds)"

@@ -1,0 +1,33 @@
+en:
+  js:
+    transit_tracker:
+      title: "Transit Tracker"
+      board: "Departure Board"
+      filters:
+        all: "All"
+        flights: "Flights"
+        trains: "Trains"
+        buses: "Buses"
+        trams: "Trams"
+        metro: "Metro"
+      columns:
+        time: "Time"
+        route: "Route"
+        destination: "Destination"
+        platform: "Platform"
+        gate: "Gate"
+        status: "Status"
+        countdown: "Departs"
+      status:
+        scheduled: "Scheduled"
+        boarding: "Boarding"
+        departed: "Departed"
+        delayed: "Delayed"
+        arrived: "Arrived"
+        canceled: "Canceled"
+        diverted: "Diverted"
+      gate: "Gate"
+      minutes: "min"
+      now: "Now"
+      departed: "Departed"
+      no_departures: "No departures scheduled"
