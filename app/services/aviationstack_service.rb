@@ -80,8 +80,34 @@ class AviationstackService
       departure_info = flight["departure"]
       arrival_info = flight["arrival"]
       flight_info = flight["flight"]
+      flight_status = flight["flight_status"]
 
       next unless departure_info && arrival_info && flight_info
+
+      # Handle code-share flights: use operating carrier as the natural key
+      codeshared = flight_info["codeshared"]
+      if codeshared.present?
+        # This is a marketing carrier selling seats on another airline's flight
+        # Use the operating flight as trip_id so all code-shares merge
+        operating_flight = codeshared["flight_iata"] || codeshared["flight_icao"]
+        trip_id = "#{operating_flight}-#{departure_info['scheduled']}"
+        marketing_flight = flight_info["iata"] || flight_info["icao"]
+
+        Rails.logger.info "[TransitTracker] Code-share detected: #{marketing_flight} operated by #{operating_flight}"
+      else
+        # Regular flight: use this flight's number
+        trip_id = "#{flight_info['iata']}-#{departure_info['scheduled']}"
+        marketing_flight = flight_info["iata"] || flight_info["icao"]
+      end
+
+      # Map API status to our status tags (API is source of truth)
+      status = case flight_status
+      when "cancelled" then "canceled"  # Convert British → American spelling
+      when "active" then "departed"     # In the air
+      when "landed" then "departed"     # Already arrived
+      when "scheduled" then nil         # Use timing-based inference
+      else nil                          # Unknown status, use timing-based inference
+      end
 
       departure = {
         mode: "flight",
@@ -97,12 +123,26 @@ class AviationstackService
         platform: nil,
         gate: departure_info["gate"],
         terminal: departure_info["terminal"],
-        route_short_name: flight_info["iata"] || flight_info["icao"],
+        route_short_name: marketing_flight,
         headsign: arrival_info["airport"],
-        trip_id: "#{flight_info['iata']}-#{departure_info['scheduled']}",
+        trip_id: trip_id,
         vehicle_id: flight["aircraft"]&.dig("registration"),
         source: "aviationstack",
         stops: [],
+        status: status,  # API status (if provided)
+        # Extra flight details for the details post
+        flight_details: {
+          airline_name: flight["airline"]&.dig("name"),
+          airline_iata: flight["airline"]&.dig("iata"),
+          flight_status: flight_status,
+          departure_delay: departure_info["delay"],
+          departure_actual: parse_time(departure_info["actual"]),
+          arrival_gate: arrival_info["gate"],
+          arrival_baggage: arrival_info["baggage"],
+          arrival_actual: parse_time(arrival_info["actual"]),
+          aircraft_registration: flight["aircraft"]&.dig("registration"),
+          codeshare_info: codeshared,  # Store the full codeshare object
+        },
       }
 
       departures << departure
