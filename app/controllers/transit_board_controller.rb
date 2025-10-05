@@ -1,8 +1,6 @@
 # frozen_string_literal: true
 
 class TransitBoardController < ApplicationController
-  skip_before_action :check_xhr, :preload_json, :verify_authenticity_token
-
   def index
     category_ids = [
       SiteSetting.transit_tracker_planes_category_id,
