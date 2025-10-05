@@ -204,6 +204,7 @@ export default class TransitBoard extends Component {
         <div class="board-header-row">
           <div class="col-time">{{i18n "transit_tracker.columns.time"}}</div>
           <div class="col-route">{{i18n "transit_tracker.columns.route"}}</div>
+          <div class="col-origin">{{i18n "transit_tracker.columns.origin"}}</div>
           <div class="col-destination">{{i18n
               "transit_tracker.columns.destination"
             }}</div>
@@ -246,6 +247,13 @@ export default class TransitBoard extends Component {
                     {{code}}
                   </span>
                 {{/each}}
+              </div>
+
+              <div class="col-origin">
+                <div class="origin-main">{{departure.origin_name}}</div>
+                {{#if departure.origin}}
+                  <div class="origin-code">{{departure.origin}}</div>
+                {{/if}}
               </div>
 
               <div class="col-destination">

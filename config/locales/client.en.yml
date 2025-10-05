@@ -13,6 +13,7 @@ en:
       columns:
         time: "Time"
         route: "Route"
+        origin: "Origin"
         destination: "Destination"
         platform: "Platform"
         gate: "Gate"
