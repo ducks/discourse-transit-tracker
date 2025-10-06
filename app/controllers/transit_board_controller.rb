@@ -10,8 +10,8 @@ class TransitBoardController < ApplicationController
 
     return render json: { departures: [] } if category_ids.empty?
 
-    # Get topics with transit data
-    topics =
+    # Build base query
+    topics_query =
       Topic
         .where(category_id: category_ids)
         .where(deleted_at: nil)
@@ -19,7 +19,16 @@ class TransitBoardController < ApplicationController
           "EXISTS (SELECT 1 FROM topic_custom_fields WHERE topic_id = topics.id AND name = 'transit_trip_id')",
         )
         .includes(:tags, :posts)
-        .limit(200)
+
+    # Filter by mode if specified - do this at the database level
+    mode_filter = params[:mode]
+    if mode_filter.present?
+      topics_query = topics_query.joins(:tags).where(tags: { name: mode_filter })
+    end
+
+    # Get topics (increase limit for metro to ensure variety across all routes)
+    limit = mode_filter == "metro" ? 2000 : 200
+    topics = topics_query.limit(limit)
 
     # Filter and sort by departure time (est or scheduled)
     now = Time.now
@@ -49,10 +58,11 @@ class TransitBoardController < ApplicationController
     # Serialize departures
     departures = sorted_topics.map { |topic| serialize_departure(topic) }
 
-    # Filter by mode if specified
-    mode_filter = params[:mode]
-    if mode_filter.present?
-      departures = departures.select { |d| d[:mode] == mode_filter }
+    # Limit departures per route for better variety (especially for metro)
+    if mode_filter == "metro"
+      departures_by_route = departures.group_by { |d| d[:route] }
+      departures = departures_by_route.flat_map { |route, deps| deps.first(5) }
+      departures = departures.sort_by { |d| Time.parse(d[:dep_sched_at] || d[:dep_est_at]) }
     end
 
     render json: { departures: departures }
@@ -86,6 +96,7 @@ class TransitBoardController < ApplicationController
       mode: mode_tag,
       status: status_tag,
       route: topic.custom_fields["transit_route_short_name"],
+      route_color: topic.custom_fields["transit_route_color"],
       headsign: topic.custom_fields["transit_headsign"],
       platform: topic.custom_fields["transit_platform"],
       gate: topic.custom_fields["transit_gate"],
