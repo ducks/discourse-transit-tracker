@@ -280,6 +280,7 @@ class TransitLeg
       "transit_gate" => attributes[:gate],
       "transit_terminal" => attributes[:terminal],
       "transit_route_short_name" => attributes[:route_short_name],
+      "transit_route_color" => attributes[:route_color],
       "transit_headsign" => attributes[:headsign],
       "transit_trip_id" => attributes[:trip_id],
       "transit_vehicle_id" => attributes[:vehicle_id],

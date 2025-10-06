@@ -243,7 +243,10 @@ export default class TransitBoard extends Component {
 
               <div class="col-route">
                 {{#each (this.getFlightCodes departure.route) as |code|}}
-                  <span class="route-badge mode-{{departure.mode}}">
+                  <span
+                    class="route-badge mode-{{departure.mode}}"
+                    style="{{if departure.route_color (concat 'background: linear-gradient(135deg, #' departure.route_color ' 0%, #' departure.route_color ' 100%) !important; border-color: #' departure.route_color ' !important;')}}"
+                  >
                     {{code}}
                   </span>
                 {{/each}}
@@ -275,7 +278,11 @@ export default class TransitBoard extends Component {
 
               <div class="col-status">
                 <span class="status-badge">
-                  {{i18n (concat "transit_tracker.status." departure.status)}}
+                  {{#if departure.status}}
+                    {{i18n (concat "transit_tracker.status." departure.status)}}
+                  {{else}}
+                    {{i18n "transit_tracker.status.scheduled"}}
+                  {{/if}}
                 </span>
               </div>
 

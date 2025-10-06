@@ -40,6 +40,7 @@ after_initialize do
   register_topic_custom_field_type("transit_gate", :string)
   register_topic_custom_field_type("transit_terminal", :string)
   register_topic_custom_field_type("transit_route_short_name", :string)
+  register_topic_custom_field_type("transit_route_color", :string)
   register_topic_custom_field_type("transit_headsign", :string)
   register_topic_custom_field_type("transit_trip_id", :string)
   register_topic_custom_field_type("transit_vehicle_id", :string)
