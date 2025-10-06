@@ -18,7 +18,7 @@ class TransitBoardController < ApplicationController
         .where(
           "EXISTS (SELECT 1 FROM topic_custom_fields WHERE topic_id = topics.id AND name = 'transit_trip_id')",
         )
-        .includes(:tags, :posts)
+        .includes(:tags)
 
     # Filter by mode if specified - do this at the database level
     mode_filter = params[:mode]
@@ -26,9 +26,38 @@ class TransitBoardController < ApplicationController
       topics_query = topics_query.joins(:tags).where(tags: { name: mode_filter })
     end
 
-    # Get topics (increase limit for metro to ensure variety across all routes)
-    limit = mode_filter == "metro" ? 2000 : 200
-    topics = topics_query.limit(limit)
+    # For metro, get 5 departures per route for better variety
+    if mode_filter == "metro"
+      # Get all distinct routes
+      route_names =
+        Topic
+          .joins(:tags)
+          .joins(
+            "INNER JOIN topic_custom_fields tcf ON topics.id = tcf.topic_id AND tcf.name = 'transit_route_short_name'",
+          )
+          .where(tags: { name: "metro" })
+          .where(category_id: category_ids)
+          .where(deleted_at: nil)
+          .distinct
+          .pluck("tcf.value")
+
+      # Get first 5 topics for each route
+      topics = []
+      route_names.each do |route|
+        route_topics =
+          topics_query
+            .joins(
+              "INNER JOIN topic_custom_fields tcf ON topics.id = tcf.topic_id AND tcf.name = 'transit_route_short_name'",
+            )
+            .where("tcf.value = ?", route)
+            .order("topics.id ASC")
+            .limit(5)
+            .to_a
+        topics.concat(route_topics)
+      end
+    else
+      topics = topics_query.limit(200)
+    end
 
     # Filter and sort by departure time (est or scheduled)
     now = Time.now
@@ -58,13 +87,6 @@ class TransitBoardController < ApplicationController
     # Serialize departures
     departures = sorted_topics.map { |topic| serialize_departure(topic) }
 
-    # Limit departures per route for better variety (especially for metro)
-    if mode_filter == "metro"
-      departures_by_route = departures.group_by { |d| d[:route] }
-      departures = departures_by_route.flat_map { |route, deps| deps.first(5) }
-      departures = departures.sort_by { |d| Time.parse(d[:dep_sched_at] || d[:dep_est_at]) }
-    end
-
     render json: { departures: departures }
   end
 
@@ -78,17 +100,6 @@ class TransitBoardController < ApplicationController
 
     stops_json = topic.custom_fields["transit_stops"]
     stops = stops_json ? JSON.parse(stops_json) : []
-
-    # Get posts (excluding the first OP, include schedule and updates)
-    posts = topic.posts.where("post_number > 1").order(:post_number).map do |post|
-      {
-        id: post.id,
-        post_number: post.post_number,
-        cooked: post.cooked,
-        created_at: post.created_at,
-        username: post.user.username
-      }
-    end
 
     {
       id: topic.id,
@@ -110,7 +121,7 @@ class TransitBoardController < ApplicationController
       dest: topic.custom_fields["transit_dest"],
       dest_name: topic.custom_fields["transit_dest_name"],
       stops: stops,
-      posts: posts,
+      posts: nil,
     }
   end
 end

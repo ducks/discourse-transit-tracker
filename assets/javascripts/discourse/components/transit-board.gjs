@@ -17,6 +17,7 @@ export default class TransitBoard extends Component {
   @tracked currentTime = new Date();
   @tracked selectedMode = null;
   @tracked expandedId = null;
+  @tracked loading = false;
 
   refreshInterval = null;
   timeUpdateInterval = null;
@@ -27,9 +28,9 @@ export default class TransitBoard extends Component {
     const urlParams = new URLSearchParams(window.location.search);
     this.selectedMode = urlParams.get('mode');
 
-    // Refresh data every 30 seconds
+    // Refresh data every 30 seconds (silent refresh, no loading indicator)
     this.refreshInterval = setInterval(() => {
-      this.refreshDepartures();
+      this.refreshDepartures(false);
     }, 30000);
 
     // Update current time every second for countdown
@@ -40,8 +41,8 @@ export default class TransitBoard extends Component {
     // Initial time
     this.currentTime = new Date();
 
-    // Initial load
-    this.refreshDepartures();
+    // Initial load (show loading indicator)
+    this.refreshDepartures(true);
   }
 
   @action
@@ -56,16 +57,49 @@ export default class TransitBoard extends Component {
     }
   }
 
-  async refreshDepartures() {
+  async refreshDepartures(showLoading = false) {
+    if (showLoading) {
+      this.loading = true;
+    }
     try {
       let url = "/transit/board";
       if (this.selectedMode) {
         url += `?mode=${this.selectedMode}`;
       }
       const data = await ajax(url);
-      this.departures = data.departures;
+
+      // Smartly update departures - only change what's different
+      const newDepartures = data.departures;
+      const existingIds = this.departures.map(d => d.id);
+      const newIds = newDepartures.map(d => d.id);
+
+      // Remove departures that no longer exist
+      this.departures = this.departures.filter(d => newIds.includes(d.id));
+
+      // Update existing departures and add new ones
+      newDepartures.forEach(newDep => {
+        const existingIndex = this.departures.findIndex(d => d.id === newDep.id);
+        if (existingIndex >= 0) {
+          // Update existing departure
+          this.departures[existingIndex] = newDep;
+        } else {
+          // Add new departure
+          this.departures.push(newDep);
+        }
+      });
+
+      // Sort by departure time
+      this.departures = this.departures.sort((a, b) => {
+        const timeA = new Date(a.dep_est_at || a.dep_sched_at);
+        const timeB = new Date(b.dep_est_at || b.dep_sched_at);
+        return timeA - timeB;
+      });
     } catch (error) {
       console.error("Failed to refresh departures:", error);
+    } finally {
+      if (showLoading) {
+        this.loading = false;
+      }
     }
   }
 
@@ -82,8 +116,8 @@ export default class TransitBoard extends Component {
     }
     window.history.pushState({}, '', url);
 
-    // Refresh data
-    this.refreshDepartures();
+    // Refresh data (show loading indicator on filter change)
+    this.refreshDepartures(true);
   }
 
   @action
@@ -200,8 +234,15 @@ export default class TransitBoard extends Component {
         </button>
       </div>
 
-      <div class="transit-board">
-        <div class="board-header-row">
+      {{#if this.loading}}
+        <div class="transit-board">
+          <div class="board-empty">
+            <p>Loading departures...</p>
+          </div>
+        </div>
+      {{else}}
+        <div class="transit-board">
+          <div class="board-header-row">
           <div class="col-time">{{i18n "transit_tracker.columns.time"}}</div>
           <div class="col-route">{{i18n "transit_tracker.columns.route"}}</div>
           <div class="col-origin">{{i18n "transit_tracker.columns.origin"}}</div>
@@ -306,12 +347,31 @@ export default class TransitBoard extends Component {
 
             {{#if (eq this.expandedId departure.id)}}
               <div class="board-row-expanded">
-                {{#if departure.posts}}
-                  {{#each departure.posts as |post|}}
-                    <div class="departure-post">
-                      {{{post.cooked}}}
-                    </div>
-                  {{/each}}
+                {{#if (gt departure.stops.length 2)}}
+                  <div class="departure-post">
+                    <h2>Complete Schedule</h2>
+                    <p><strong>Line:</strong> {{departure.route}}</p>
+                    <p><strong>Direction:</strong> {{departure.headsign}}</p>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Stop</th>
+                          <th>Arrival</th>
+                          <th>Departure</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {{#each departure.stops as |stop|}}
+                          <tr>
+                            <td>{{stop.stop_name}}</td>
+                            <td>{{if stop.arrival_time (this.formatTime stop.arrival_time) "—"}}</td>
+                            <td>{{if stop.departure_time (this.formatTime stop.departure_time) "—"}}</td>
+                          </tr>
+                        {{/each}}
+                      </tbody>
+                    </table>
+                    <p><em>Schedule times are in UTC. This is the planned schedule and may be subject to delays.</em></p>
+                  </div>
                 {{else}}
                   <div class="departure-post">
                     <p><em>No additional details available</em></p>
@@ -326,6 +386,7 @@ export default class TransitBoard extends Component {
           </div>
         {{/each}}
       </div>
+      {{/if}}
     </div>
   </template>
 }
