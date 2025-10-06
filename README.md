@@ -36,21 +36,24 @@ Each departure is a Discourse topic with:
 
 ### Multiple Data Sources
 
-**Amtrak (GTFS)** - The most developed integration:
+**Amtrak (GTFS)**:
 - Downloads and parses Amtrak's GTFS feed
 - Creates departure topics with detailed stop schedules
 - Handles ~2,300 trips, creates ~600 topics (duplicates merged)
 - Includes coordinates for every stop
 
-**Prague Transit (Golemio API)**:
-- Fetches real-time tram/bus/metro data
-- Automatic polling and updates
-- Example implementation for European transit
+**NYC MTA Subway (GTFS)**:
+- Downloads and parses MTA's massive GTFS feed (500k+ stop times)
+- Creates metro departure topics with complete schedules
+- Official MTA line colors (red 1/2/3, green 4/5/6, yellow N/Q/R/W, etc.)
+- 6-hour import window creates ~5,000 departure topics
+- Per-route query optimization for fast filtering
 
 **Flights (AviationStack API)**:
 - Flight departure tracking
 - Gate assignments and delay detection
 - Code-share flight detection and merging
+- Multiple airlines on same physical flight merged into one topic
 
 ## Installation
 
@@ -111,20 +114,17 @@ RAILS_ENV=production bundle exec rake transit_tracker:import_amtrak
 
 This downloads the latest Amtrak GTFS feed and creates ~600 departure topics with complete schedules. No API key required.
 
-#### Option B: Prague Transit (Golemio API)
+#### Option B: NYC MTA Subway GTFS
 
-Get an API token from [api.golemio.cz](https://api.golemio.cz/api-keys/auth/sign-in), then configure:
+```bash
+./launcher enter app
+cd /var/www/discourse
+RAILS_ENV=production bundle exec rake transit_tracker:import_mta
+```
 
-- **transit_tracker_golemio_api_token**: Your API token
-- **transit_tracker_monitored_stops**: Comma-separated stop IDs (e.g., `U297Z1P,U335Z1P`)
-- **transit_tracker_polling_interval_minutes**: How often to poll (default: 30)
-- **transit_tracker_time_window_minutes**: How far ahead to fetch (default: 30)
+This downloads the MTA's GTFS feed and creates subway departure topics for the next 6 hours (~5,000 topics). Includes official line colors. No API key required.
 
-To find Prague stop IDs: Visit [pid.cz](https://pid.cz/), search for your stop, and grab the ID from the URL.
-
-Example stops:
-- `U297Z1P` - Můstek (Metro A)
-- `U335Z1P` - Muzeum (Metro A)
+**Note**: MTA GTFS is very large (500k+ stop times). The 6-hour window is intentional to avoid memory issues and topic overload.
 
 #### Option C: Flights (AviationStack API)
 
@@ -153,6 +153,7 @@ Each departure is stored as a topic with custom fields:
 | `transit_service_date` | Service date (YYYY-MM-DD) |
 | `transit_trip_id` | Unique trip identifier (natural key) |
 | `transit_route_short_name` | Route number/code |
+| `transit_route_color` | Route color hex code (no #) for badge styling |
 | `transit_headsign` | Destination name |
 | `transit_origin` | Origin code (airport/station) |
 | `transit_origin_name` | Origin full name |
@@ -166,7 +167,7 @@ Each departure is stored as a topic with custom fields:
 | `transit_gate` | Gate number (flights) |
 | `transit_terminal` | Terminal (flights) |
 | `transit_vehicle_id` | Vehicle identifier |
-| `transit_source` | Data source (amtrak, golemio, aviationstack) |
+| `transit_source` | Data source (amtrak, mta, aviationstack) |
 | `transit_stops` | JSON array of stops with coordinates and times |
 
 Tags:
@@ -204,12 +205,9 @@ Posts:
 
 ### Code-Share Detection (Flights)
 
-Multiple airlines can sell seats on the same physical flight. The plugin detects this by matching:
-- Same departure time
-- Same destination
-- Same gate (if assigned)
+Multiple airlines can sell seats on the same physical flight. AviationStack provides a `codeshared` field identifying the operating carrier. The plugin uses the operating carrier's flight number as the natural key (trip_id), so marketing carriers automatically merge into the same topic.
 
-When found, flight numbers are merged: `AA123 / BA456 / IB789` → One topic, multiple route codes.
+Example: American operates flight AA 1234, but British Airways sells it as BA 5678 and Iberia as IB 789. All three point to the same trip_id, creating one topic with merged route codes: `AA 1234 / BA 5678 / IB 789`
 
 ### GTFS Parsing (Amtrak)
 
@@ -230,6 +228,21 @@ Edge cases handled:
 - Stop sequences aren't always sequential
 - All times converted to UTC
 
+### GTFS Parsing (MTA)
+
+The `MtaGtfsService` follows the same pattern as Amtrak but handles a much larger dataset:
+
+1. Downloads `google_transit.zip` from MTA's developer portal
+2. Parses 500k+ stop_times rows (all trains, all stops, weeks ahead)
+3. **6-hour import window** instead of 24 hours to avoid memory issues
+4. Extracts `route_color` field for authentic MTA line colors
+5. Creates ~5,000 departure topics with schedules
+
+Performance optimizations for metro filtering:
+- Per-route query limiting: Load 5 departures per route (~125 topics total)
+- Smart refresh: Updates changed items in place, no full page reload
+- Lazy post loading: Schedule rendered from stops JSON, not database posts
+
 ## Rake Tasks
 
 ```bash
@@ -238,6 +251,9 @@ rake transit_tracker:setup
 
 # Import Amtrak GTFS data
 rake transit_tracker:import_amtrak
+
+# Import NYC MTA Subway GTFS data
+rake transit_tracker:import_mta
 
 # Clean up old departed topics (optional)
 rake transit_tracker:cleanup
@@ -258,6 +274,9 @@ bin/rails server
 # Test Amtrak import
 RAILS_ENV=development bundle exec rake transit_tracker:import_amtrak
 
+# Test MTA import (creates ~5,000 topics)
+RAILS_ENV=development bundle exec rake transit_tracker:import_mta
+
 # Check board endpoint
 curl http://localhost:3000/transit/board
 
@@ -268,14 +287,14 @@ open http://localhost:3000/board
 ### Testing services in Rails console
 
 ```ruby
-# Test Golemio
-golemio = GolemioService.new
-departures = golemio.fetch_departures
-puts departures.inspect
-
 # Test Amtrak GTFS
 amtrak = AmtrakGtfsService.new
 stats = amtrak.import
+puts stats.inspect
+
+# Test MTA GTFS
+mta = MtaGtfsService.new
+stats = mta.import
 puts stats.inspect
 
 # Test AviationStack
