@@ -151,18 +151,30 @@ class AmtrakGtfsService
     today = now.to_date
     time_window_end = now + 24.hours
 
+    # Debug counters
+    skip_reasons = Hash.new(0)
+
     # Group stop_times by trip_id for efficient lookup
     stop_times_by_trip = stop_times.group_by { |st| st[:trip_id] }
 
     # Process each trip
     trips.each do |trip_id, trip_data|
-      next unless trip_data[:route_id]
+      unless trip_data[:route_id]
+        skip_reasons[:no_route_id] += 1
+        next
+      end
 
       route = routes[trip_data[:route_id]]
-      next unless route
+      unless route
+        skip_reasons[:route_not_found] += 1
+        next
+      end
 
       trip_stop_times = stop_times_by_trip[trip_id] || []
-      next if trip_stop_times.empty?
+      if trip_stop_times.empty?
+        skip_reasons[:no_stop_times] += 1
+        next
+      end
 
       # Sort by stop sequence
       trip_stop_times = trip_stop_times.sort_by { |st| st[:stop_sequence] }
@@ -171,21 +183,33 @@ class AmtrakGtfsService
       first_stop = trip_stop_times.first
       last_stop = trip_stop_times.last
 
-      next unless first_stop && last_stop
+      unless first_stop && last_stop
+        skip_reasons[:missing_stops] += 1
+        next
+      end
 
       origin_stop = stops[first_stop[:stop_id]]
       dest_stop = stops[last_stop[:stop_id]]
 
-      next unless origin_stop && dest_stop
+      unless origin_stop && dest_stop
+        skip_reasons[:stop_data_missing] += 1
+        next
+      end
 
       # Parse departure time (GTFS uses HH:MM:SS format, can be > 24 hours)
       dep_time = parse_gtfs_time(today, first_stop[:departure_time])
       arr_time = parse_gtfs_time(today, last_stop[:arrival_time])
 
-      next unless dep_time
+      unless dep_time
+        skip_reasons[:invalid_dep_time] += 1
+        next
+      end
 
       # Only create departures within our time window
-      next if dep_time < now || dep_time > time_window_end
+      if dep_time < now || dep_time > time_window_end
+        skip_reasons[:outside_time_window] += 1
+        next
+      end
 
       # Build detailed stops array with times and coordinates
       detailed_stops = trip_stop_times.map do |st|
@@ -237,11 +261,25 @@ class AmtrakGtfsService
 
         stats[:departures_created] += 1
       rescue => e
+        puts "  ❌ Error creating departure for trip #{trip_id}:"
+        puts "     #{e.class}: #{e.message}"
+        puts "     Route: #{route[:short_name] || route[:long_name]}"
+        puts "     #{origin_stop[:name]} → #{dest_stop[:name]}"
         Rails.logger.error "[TransitTracker] Failed to create departure for trip #{trip_id}: #{e.message}"
+        Rails.logger.error e.backtrace.first(5).join("\n")
         stats[:errors] += 1
       end
 
       stats[:trips_processed] += 1
+    end
+
+    # Log skip reasons for debugging
+    if skip_reasons.any?
+      puts "\n📊 Trip Skip Reasons:"
+      skip_reasons.sort_by { |_, count| -count }.each do |reason, count|
+        puts "  #{reason}: #{count}"
+      end
+      puts ""
     end
   end
 

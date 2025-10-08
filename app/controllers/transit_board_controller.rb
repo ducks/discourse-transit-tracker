@@ -18,7 +18,7 @@ class TransitBoardController < ApplicationController
         .where(
           "EXISTS (SELECT 1 FROM topic_custom_fields WHERE topic_id = topics.id AND name = 'transit_trip_id')",
         )
-        .includes(:tags)
+        .includes(:tags, :posts)
 
     # Filter by mode if specified - do this at the database level
     mode_filter = params[:mode]
@@ -101,6 +101,13 @@ class TransitBoardController < ApplicationController
     stops_json = topic.custom_fields["transit_stops"]
     stops = stops_json ? JSON.parse(stops_json) : []
 
+    # For flights, include the details post content (Post #2)
+    details_html = nil
+    if mode_tag == "flight"
+      details_post = topic.posts.where(post_number: 2).first
+      details_html = details_post&.cooked
+    end
+
     {
       id: topic.id,
       title: topic.title,
@@ -121,7 +128,7 @@ class TransitBoardController < ApplicationController
       dest: topic.custom_fields["transit_dest"],
       dest_name: topic.custom_fields["transit_dest_name"],
       stops: stops,
-      posts: nil,
+      details_html: details_html,
     }
   end
 end

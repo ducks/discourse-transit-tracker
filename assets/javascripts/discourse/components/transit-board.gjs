@@ -347,7 +347,17 @@ export default class TransitBoard extends Component {
 
             {{#if (eq this.expandedId departure.id)}}
               <div class="board-row-expanded">
-                {{#if (gt departure.stops.length 2)}}
+                {{#if (eq departure.mode "flight")}}
+                  {{#if departure.details_html}}
+                    <div class="departure-post">
+                      {{{departure.details_html}}}
+                    </div>
+                  {{else}}
+                    <div class="departure-post">
+                      <p><em>No additional details available</em></p>
+                    </div>
+                  {{/if}}
+                {{else if (gt departure.stops.length 2)}}
                   <div class="departure-post">
                     <h2>Complete Schedule</h2>
                     <p><strong>Line:</strong> {{departure.route}}</p>
