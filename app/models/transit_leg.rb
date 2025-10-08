@@ -85,6 +85,17 @@ class TransitLeg
       end
     end
 
+    # If still no match, try to find by title to avoid duplicates
+    if !topic
+      title = build_title(attributes)
+      category_id = determine_category(attributes[:mode])
+      topic = Topic.where(title: title, category_id: category_id).first
+      if topic
+        Rails.logger.info "[TransitTracker] Found existing topic by title, will update: #{title}"
+        is_new = false
+      end
+    end
+
     if topic && !is_new
       update_topic(topic, attributes)
     else
