@@ -2,8 +2,6 @@
 
 A Discourse plugin that transforms your forum into a live departure board for tracking planes, trains, and public transit. Think airport/train station split-flap displays, but powered by Discourse topics.
 
-![Departure Board](discourse-transit-tracker-1.png)
-
 ## Why?
 
 Discourse topics are surprisingly flexible containers for structured data. This plugin proves you can use them to store and display time-sensitive transit information with built-in update history, moderation tools, and a beautiful UI.
@@ -33,6 +31,44 @@ Each departure is a Discourse topic with:
 - Post #1: Basic departure info
 - Post #2: Complete schedule table (for multi-stop trips)
 - Post #3+: Delay notifications and status updates
+
+## Screenshots
+
+<details>
+<summary>transit-tracker-planes.png</summary>
+
+![transit-tracker-planes.png](transit-tracker-planes.png)
+</details>
+
+<details>
+<summary>transit-tracker-planes-expanded.png</summary>
+
+![transit-tracker-planes-expanded.png](transit-tracker-planes-expanded.png)
+</details>
+
+<details>
+<summary>transit-tracker-mta.png</summary>
+
+![transit-tracker-mta.png](transit-tracker-mta.png)
+</details>
+
+<details>
+<summary>transit-tracker-mta-expanded.png</summary>
+
+![transit-tracker-mta-expanded.png](transit-tracker-mta-expanded.png)
+</details>
+
+<details>
+<summary>transit-tracker-trains.png</summary>
+
+![transit-tracker-trains.png](transit-tracker-trains.png)
+</details>
+
+<details>
+<summary>transit-tracker-trains-expanded.png</summary>
+
+![transit-tracker-trains-expanded.png](transit-tracker-trains-expanded.png)
+</details>
 
 ### Multiple Data Sources
 
