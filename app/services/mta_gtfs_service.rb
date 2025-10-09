@@ -219,6 +219,9 @@ class MtaGtfsService
 
         next unless dep_time
 
+        # Skip if train has already departed
+        next if dep_time < now
+
         # Build detailed stops array
         detailed_stops = trip_stop_times.map do |st|
           stop_info = stops[st[:stop_id]]
@@ -304,22 +307,27 @@ class MtaGtfsService
   end
 
   def build_schedule_content(stops, route, trip_data)
-    content = "## Complete Schedule\n\n"
-    content += "**Line:** #{route[:short_name]}\n"
-    content += "**Direction:** #{trip_data[:headsign]}\n\n"
-    content += "| Stop | Arrival | Departure |\n"
-    content += "|------|---------|----------|\n"
-
-    stops.each do |stop|
+    # Build only the dynamic stop rows
+    stop_rows = stops.map do |stop|
       arrival = stop[:arrival_time] ? Time.parse(stop[:arrival_time]).strftime("%H:%M") : "—"
       departure = stop[:departure_time] ? Time.parse(stop[:departure_time]).strftime("%H:%M") : "—"
       stop_name = stop[:stop_name] || stop[:stop_id]
+      "| #{stop_name} | #{arrival} | #{departure} |"
+    end.join("\n")
 
-      content += "| #{stop_name} | #{arrival} | #{departure} |\n"
-    end
+    # Use heredoc template with interpolated values
+    <<~SCHEDULE
+      ## Complete Schedule
 
-    content += "\n_Schedule times are in UTC. This is the planned schedule and may be subject to delays._"
-    content
+      **Line:** #{route[:short_name]}
+      **Direction:** #{trip_data[:headsign]}
+
+      | Stop | Arrival | Departure |
+      |------|---------|-----------|
+      #{stop_rows}
+
+      _Schedule times are in UTC. This is the planned schedule and may be subject to delays._
+    SCHEDULE
   end
 
   def parse_gtfs_time(base_date, time_string)

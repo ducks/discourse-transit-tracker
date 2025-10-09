@@ -41,7 +41,7 @@ class TransitBoardController < ApplicationController
           .distinct
           .pluck("tcf.value")
 
-      # Get first 5 topics for each route
+      # Get first 5 topics for each route, ordered by departure time
       topics = []
       route_names.each do |route|
         route_topics =
@@ -49,8 +49,11 @@ class TransitBoardController < ApplicationController
             .joins(
               "INNER JOIN topic_custom_fields tcf ON topics.id = tcf.topic_id AND tcf.name = 'transit_route_short_name'",
             )
+            .joins(
+              "INNER JOIN topic_custom_fields dep ON topics.id = dep.topic_id AND dep.name = 'transit_dep_sched_at'",
+            )
             .where("tcf.value = ?", route)
-            .order("topics.id ASC")
+            .order("dep.value ASC")
             .limit(5)
             .to_a
         topics.concat(route_topics)
