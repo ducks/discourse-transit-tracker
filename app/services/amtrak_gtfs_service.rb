@@ -146,10 +146,11 @@ class AmtrakGtfsService
   end
 
   def create_departures(routes, stops, trips, stop_times, stats)
-    # Get today's date and time window
+    # Get today's service date
     now = Time.zone.now
     today = now.to_date
-    time_window_end = now + 24.hours
+
+    Rails.logger.info "[TransitTracker] Importing full service day for #{today}"
 
     # Debug counters
     skip_reasons = Hash.new(0)
@@ -202,12 +203,6 @@ class AmtrakGtfsService
 
       unless dep_time
         skip_reasons[:invalid_dep_time] += 1
-        next
-      end
-
-      # Only create departures within our time window
-      if dep_time < now || dep_time > time_window_end
-        skip_reasons[:outside_time_window] += 1
         next
       end
 

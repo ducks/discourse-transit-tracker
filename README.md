@@ -169,6 +169,16 @@ Get an API key from [aviationstack.com](https://aviationstack.com/), then config
 - **transit_tracker_aviationstack_api_key**: Your API key
 - **transit_tracker_monitored_airports**: Comma-separated airport codes (e.g., `SFO,LAX`)
 
+Run the updater manually:
+
+```bash
+./launcher enter app
+cd /var/www/discourse
+RAILS_ENV=production rails runner "TransitUpdaterService.update_all"
+```
+
+**Note**: The scheduled job is disabled by default to save API credits. Run the updater command manually when you want fresh flight data.
+
 ### 5. View the board
 
 Navigate to `/board` to see your departure board in action.

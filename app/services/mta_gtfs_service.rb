@@ -131,18 +131,17 @@ class MtaGtfsService
 
   # Memory-efficient streaming approach
   def create_departures_streaming(routes, stops, trips, stop_times_csv, stats)
-    # Get today's date and time window
+    # Get today's service date
     now = Time.zone.now
     today = now.to_date
-    time_window_end = now + 2.hours
 
-    Rails.logger.info "[TransitTracker] Filtering trips in time window (#{now} to #{time_window_end})"
+    Rails.logger.info "[TransitTracker] Importing full service day for #{today}"
 
-    # First pass: Find trips in our time window by checking first stops
+    # First pass: Find all trips for today's service date
     # Keep only trip_id and first departure time to minimize memory
     valid_trips = {}
 
-    Rails.logger.info "[TransitTracker] First pass: identifying trips in time window..."
+    Rails.logger.info "[TransitTracker] First pass: identifying trips for service day..."
     CSV.parse(stop_times_csv, headers: true) do |row|
       trip_id = row["trip_id"]
       stop_sequence = row["stop_sequence"].to_i
@@ -156,13 +155,11 @@ class MtaGtfsService
       dep_time = parse_gtfs_time(today, departure_time)
       next unless dep_time
 
-      # Check if in our time window
-      if dep_time >= now && dep_time <= time_window_end
-        valid_trips[trip_id] = dep_time
-      end
+      # Include all trips for today's service date
+      valid_trips[trip_id] = dep_time
     end
 
-    Rails.logger.info "[TransitTracker] Found #{valid_trips.size} trips in time window"
+    Rails.logger.info "[TransitTracker] Found #{valid_trips.size} trips for service day"
 
     # Second pass: Load stop times ONLY for valid trips
     # Process in batches to avoid memory buildup
@@ -304,22 +301,27 @@ class MtaGtfsService
   end
 
   def build_schedule_content(stops, route, trip_data)
-    content = "## Complete Schedule\n\n"
-    content += "**Line:** #{route[:short_name]}\n"
-    content += "**Direction:** #{trip_data[:headsign]}\n\n"
-    content += "| Stop | Arrival | Departure |\n"
-    content += "|------|---------|----------|\n"
-
-    stops.each do |stop|
+    # Build only the dynamic stop rows
+    stop_rows = stops.map do |stop|
       arrival = stop[:arrival_time] ? Time.parse(stop[:arrival_time]).strftime("%H:%M") : "—"
       departure = stop[:departure_time] ? Time.parse(stop[:departure_time]).strftime("%H:%M") : "—"
       stop_name = stop[:stop_name] || stop[:stop_id]
+      "| #{stop_name} | #{arrival} | #{departure} |"
+    end.join("\n")
 
-      content += "| #{stop_name} | #{arrival} | #{departure} |\n"
-    end
+    # Use heredoc template with interpolated values
+    <<~SCHEDULE
+      ## Complete Schedule
 
-    content += "\n_Schedule times are in UTC. This is the planned schedule and may be subject to delays._"
-    content
+      **Line:** #{route[:short_name]}
+      **Direction:** #{trip_data[:headsign]}
+
+      | Stop | Arrival | Departure |
+      |------|---------|-----------|
+      #{stop_rows}
+
+      _Schedule times are in UTC. This is the planned schedule and may be subject to delays._
+    SCHEDULE
   end
 
   def parse_gtfs_time(base_date, time_string)
