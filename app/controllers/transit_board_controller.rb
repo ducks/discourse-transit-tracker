@@ -61,8 +61,8 @@ class TransitBoardController < ApplicationController
 
     # Filter and sort by departure time (est or scheduled)
     now = Time.now
-    time_window_start = now - 24.hours  # Show flights from last 24 hours
-    time_window_end = now + 24.hours    # Show flights for next 24 hours
+    time_window_start = now              # Only show upcoming departures
+    time_window_end = now + 2.hours      # Show flights for next 2 hours
 
     topics_with_times =
       topics.map do |topic|
