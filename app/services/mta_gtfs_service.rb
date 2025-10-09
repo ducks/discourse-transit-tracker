@@ -28,12 +28,11 @@ class MtaGtfsService
       routes = parse_routes(gtfs_data[:routes])
       stops = parse_stops(gtfs_data[:stops])
       trips = parse_trips(gtfs_data[:trips])
-      stop_times = parse_stop_times(gtfs_data[:stop_times])
 
       Rails.logger.info "[TransitTracker] Parsed #{routes.size} routes, #{stops.size} stops, #{trips.size} trips"
 
-      # Create departures for the next 6 hours
-      create_departures(routes, stops, trips, stop_times, stats)
+      # Create departures for the next 2 hours (memory efficient)
+      create_departures_streaming(routes, stops, trips, gtfs_data[:stop_times], stats)
 
       Rails.logger.info "[TransitTracker] MTA import complete: #{stats}"
     rescue => e
@@ -130,125 +129,163 @@ class MtaGtfsService
     trips
   end
 
-  def parse_stop_times(csv_content)
-    return [] if csv_content.nil?
+  # Memory-efficient streaming approach
+  def create_departures_streaming(routes, stops, trips, stop_times_csv, stats)
+    # Get today's date and time window
+    now = Time.zone.now
+    today = now.to_date
+    time_window_end = now + 2.hours
 
-    stop_times = []
-    CSV.parse(csv_content, headers: true) do |row|
-      stop_times << {
-        trip_id: row["trip_id"],
+    Rails.logger.info "[TransitTracker] Filtering trips in time window (#{now} to #{time_window_end})"
+
+    # First pass: Find trips in our time window by checking first stops
+    # Keep only trip_id and first departure time to minimize memory
+    valid_trips = {}
+
+    Rails.logger.info "[TransitTracker] First pass: identifying trips in time window..."
+    CSV.parse(stop_times_csv, headers: true) do |row|
+      trip_id = row["trip_id"]
+      stop_sequence = row["stop_sequence"].to_i
+
+      # Only look at first stops (sequence 1 or 0)
+      next unless stop_sequence <= 1
+
+      departure_time = row["departure_time"]
+      next if departure_time.blank?
+
+      dep_time = parse_gtfs_time(today, departure_time)
+      next unless dep_time
+
+      # Check if in our time window
+      if dep_time >= now && dep_time <= time_window_end
+        valid_trips[trip_id] = dep_time
+      end
+    end
+
+    Rails.logger.info "[TransitTracker] Found #{valid_trips.size} trips in time window"
+
+    # Second pass: Load stop times ONLY for valid trips
+    # Process in batches to avoid memory buildup
+    Rails.logger.info "[TransitTracker] Second pass: loading stop times for valid trips..."
+
+    stop_times_by_trip = {}
+    CSV.parse(stop_times_csv, headers: true) do |row|
+      trip_id = row["trip_id"]
+      next unless valid_trips.key?(trip_id)
+
+      stop_times_by_trip[trip_id] ||= []
+      stop_times_by_trip[trip_id] << {
+        trip_id: trip_id,
         stop_id: row["stop_id"],
         stop_sequence: row["stop_sequence"].to_i,
         arrival_time: row["arrival_time"],
         departure_time: row["departure_time"]
       }
     end
-    stop_times
-  end
 
-  def create_departures(routes, stops, trips, stop_times, stats)
-    # Get today's date and time window
-    now = Time.zone.now
-    today = now.to_date
-    time_window_end = now + 6.hours
+    Rails.logger.info "[TransitTracker] Loaded stop times for #{stop_times_by_trip.size} trips"
 
-    # Group stop_times by trip_id for efficient lookup
-    stop_times_by_trip = stop_times.group_by { |st| st[:trip_id] }
+    # Process trips in batches to avoid memory issues
+    batch_size = 50
+    processed = 0
 
-    # Process each trip
-    trips.each do |trip_id, trip_data|
-      next unless trip_data[:route_id]
+    stop_times_by_trip.each_slice(batch_size) do |batch|
+      batch.each do |trip_id, trip_stop_times|
+        trip_data = trips[trip_id]
+        next unless trip_data && trip_data[:route_id]
 
-      route = routes[trip_data[:route_id]]
-      next unless route
+        route = routes[trip_data[:route_id]]
+        next unless route
 
-      trip_stop_times = stop_times_by_trip[trip_id] || []
-      next if trip_stop_times.empty?
+        next if trip_stop_times.empty?
 
-      # Sort by stop sequence
-      trip_stop_times = trip_stop_times.sort_by { |st| st[:stop_sequence] }
+        # Sort by stop sequence
+        trip_stop_times = trip_stop_times.sort_by { |st| st[:stop_sequence] }
 
-      # Get first and last stop
-      first_stop = trip_stop_times.first
-      last_stop = trip_stop_times.last
+        # Get first and last stop
+        first_stop = trip_stop_times.first
+        last_stop = trip_stop_times.last
 
-      next unless first_stop && last_stop
+        next unless first_stop && last_stop
 
-      origin_stop = stops[first_stop[:stop_id]]
-      dest_stop = stops[last_stop[:stop_id]]
+        origin_stop = stops[first_stop[:stop_id]]
+        dest_stop = stops[last_stop[:stop_id]]
 
-      next unless origin_stop && dest_stop
+        next unless origin_stop && dest_stop
 
-      # Parse departure time (GTFS uses HH:MM:SS format, can be > 24 hours)
-      dep_time = parse_gtfs_time(today, first_stop[:departure_time])
-      arr_time = parse_gtfs_time(today, last_stop[:arrival_time])
+        # Parse times
+        dep_time = parse_gtfs_time(today, first_stop[:departure_time])
+        arr_time = parse_gtfs_time(today, last_stop[:arrival_time])
 
-      next unless dep_time
+        next unless dep_time
 
-      # Only create departures within our time window
-      next if dep_time < now || dep_time > time_window_end
+        # Build detailed stops array
+        detailed_stops = trip_stop_times.map do |st|
+          stop_info = stops[st[:stop_id]]
+          next unless stop_info
 
-      # Build detailed stops array with times and coordinates
-      detailed_stops = trip_stop_times.map do |st|
-        stop_info = stops[st[:stop_id]]
-        next unless stop_info
+          {
+            stop_id: st[:stop_id],
+            stop_name: stop_info[:name],
+            stop_code: stop_info[:code],
+            lat: stop_info[:lat],
+            lon: stop_info[:lon],
+            arrival_time: parse_gtfs_time(today, st[:arrival_time])&.iso8601,
+            departure_time: parse_gtfs_time(today, st[:departure_time])&.iso8601,
+            stop_sequence: st[:stop_sequence]
+          }
+        end.compact
 
-        {
-          stop_id: st[:stop_id],
-          stop_name: stop_info[:name],
-          stop_code: stop_info[:code],
-          lat: stop_info[:lat],
-          lon: stop_info[:lon],
-          arrival_time: parse_gtfs_time(today, st[:arrival_time])&.iso8601,
-          departure_time: parse_gtfs_time(today, st[:departure_time])&.iso8601,
-          stop_sequence: st[:stop_sequence]
+        # Create the departure record
+        departure_data = {
+          mode: "metro",
+          service_date: today.to_s,
+          origin: first_stop[:stop_id],
+          origin_name: origin_stop[:name],
+          dest: last_stop[:stop_id],
+          dest_name: dest_stop[:name],
+          dep_sched_at: dep_time,
+          dep_est_at: nil,
+          arr_sched_at: arr_time,
+          arr_est_at: nil,
+          platform: nil,
+          gate: nil,
+          terminal: nil,
+          route_short_name: route[:short_name] || route[:long_name],
+          route_color: route[:color],
+          headsign: trip_data[:headsign] || dest_stop[:name],
+          trip_id: trip_id,
+          vehicle_id: nil,
+          source: "mta",
+          stops: detailed_stops
         }
-      end.compact
 
-      # Create the departure record
-      departure_data = {
-        mode: "metro",
-        service_date: today.to_s,
-        origin: first_stop[:stop_id],
-        origin_name: origin_stop[:name],
-        dest: last_stop[:stop_id],
-        dest_name: dest_stop[:name],
-        dep_sched_at: dep_time,
-        dep_est_at: nil,
-        arr_sched_at: arr_time,
-        arr_est_at: nil,
-        platform: nil,
-        gate: nil,
-        terminal: nil,
-        route_short_name: route[:short_name] || route[:long_name],
-        route_color: route[:color],
-        headsign: trip_data[:headsign] || dest_stop[:name],
-        trip_id: trip_id,
-        vehicle_id: nil,
-        source: "mta",
-        stops: detailed_stops
-      }
+        begin
+          topic = TransitLeg.create_or_update(departure_data)
 
-      begin
-        topic = TransitLeg.create_or_update(departure_data)
+          # Create a detailed schedule post if topic has stops
+          if topic && detailed_stops.length > 2
+            create_schedule_post(topic, detailed_stops, route, trip_data)
+          end
 
-        # Create a detailed schedule post if topic has stops (checks if already exists inside)
-        if topic && detailed_stops.length > 2
-          create_schedule_post(topic, detailed_stops, route, trip_data)
+          stats[:departures_created] += 1
+        rescue => e
+          Rails.logger.error "[TransitTracker] Failed to create departure for trip #{trip_id}: #{e.message}"
+          stats[:errors] += 1
         end
 
-        stats[:departures_created] += 1
-      rescue => e
-        Rails.logger.error "[TransitTracker] Failed to create departure for trip #{trip_id}: #{e.message}"
-        stats[:errors] += 1
+        stats[:trips_processed] += 1
+        processed += 1
       end
 
-      stats[:trips_processed] += 1
+      # Force garbage collection after each batch
+      GC.start if processed % batch_size == 0
+      Rails.logger.info "[TransitTracker] Processed #{processed}/#{valid_trips.size} trips..."
     end
   end
 
   def create_schedule_post(topic, stops, route, trip_data)
-    # Check if schedule post already exists (look for a post from system user that's not the first post)
+    # Check if schedule post already exists
     existing_schedule_post = topic.posts.where(user_id: Discourse.system_user.id).where("post_number > 1").first
     return if existing_schedule_post
 
