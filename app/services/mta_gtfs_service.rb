@@ -131,18 +131,17 @@ class MtaGtfsService
 
   # Memory-efficient streaming approach
   def create_departures_streaming(routes, stops, trips, stop_times_csv, stats)
-    # Get today's date and time window
+    # Get today's service date
     now = Time.zone.now
     today = now.to_date
-    time_window_end = now + 2.hours
 
-    Rails.logger.info "[TransitTracker] Filtering trips in time window (#{now} to #{time_window_end})"
+    Rails.logger.info "[TransitTracker] Importing full service day for #{today}"
 
-    # First pass: Find trips in our time window by checking first stops
+    # First pass: Find all trips for today's service date
     # Keep only trip_id and first departure time to minimize memory
     valid_trips = {}
 
-    Rails.logger.info "[TransitTracker] First pass: identifying trips in time window..."
+    Rails.logger.info "[TransitTracker] First pass: identifying trips for service day..."
     CSV.parse(stop_times_csv, headers: true) do |row|
       trip_id = row["trip_id"]
       stop_sequence = row["stop_sequence"].to_i
@@ -156,13 +155,11 @@ class MtaGtfsService
       dep_time = parse_gtfs_time(today, departure_time)
       next unless dep_time
 
-      # Check if in our time window
-      if dep_time >= now && dep_time <= time_window_end
-        valid_trips[trip_id] = dep_time
-      end
+      # Include all trips for today's service date
+      valid_trips[trip_id] = dep_time
     end
 
-    Rails.logger.info "[TransitTracker] Found #{valid_trips.size} trips in time window"
+    Rails.logger.info "[TransitTracker] Found #{valid_trips.size} trips for service day"
 
     # Second pass: Load stop times ONLY for valid trips
     # Process in batches to avoid memory buildup
@@ -218,9 +215,6 @@ class MtaGtfsService
         arr_time = parse_gtfs_time(today, last_stop[:arrival_time])
 
         next unless dep_time
-
-        # Skip if train has already departed
-        next if dep_time < now
 
         # Build detailed stops array
         detailed_stops = trip_stop_times.map do |st|

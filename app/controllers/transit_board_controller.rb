@@ -19,12 +19,18 @@ class TransitBoardController < ApplicationController
           "EXISTS (SELECT 1 FROM topic_custom_fields WHERE topic_id = topics.id AND name = 'transit_trip_id')",
         )
         .includes(:tags, :posts)
+        .preload(:_custom_fields)
 
     # Filter by mode if specified - do this at the database level
     mode_filter = params[:mode]
     if mode_filter.present?
       topics_query = topics_query.joins(:tags).where(tags: { name: mode_filter })
     end
+
+    # For demo: filter by time-of-day only (ignore date)
+    now = Time.now.utc
+    current_minutes = now.hour * 60 + now.min
+    window_minutes = 120 # 2 hours
 
     # For metro, get 5 departures per route for better variety
     if mode_filter == "metro"
@@ -53,42 +59,40 @@ class TransitBoardController < ApplicationController
               "INNER JOIN topic_custom_fields dep ON topics.id = dep.topic_id AND dep.name = 'transit_dep_sched_at'",
             )
             .where("tcf.value = ?", route)
-            .order("dep.value ASC")
+            .order("(dep.value::timestamptz AT TIME ZONE 'UTC')::time ASC")
             .limit(5)
             .to_a
         topics.concat(route_topics)
       end
     else
-      topics = topics_query.limit(200)
+      topics =
+        topics_query
+          .joins(
+            "INNER JOIN topic_custom_fields dep ON topics.id = dep.topic_id AND dep.name = 'transit_dep_sched_at'",
+          )
+          .order("(dep.value::timestamptz AT TIME ZONE 'UTC')::time ASC")
+          .limit(200)
     end
 
-    # Filter and sort by departure time (est or scheduled)
-    now = Time.now
-    time_window_start = now              # Only show upcoming departures
-    time_window_end = now + 2.hours      # Show flights for next 2 hours
+    # Filter by time-of-day window (ignore date)
+    filtered_topics = topics.select do |topic|
+      dep_time_str = topic.custom_fields["transit_dep_est_at"] || topic.custom_fields["transit_dep_sched_at"]
+      next false unless dep_time_str
 
-    topics_with_times =
-      topics.map do |topic|
-        dep_time_str =
-          topic.custom_fields["transit_dep_est_at"] ||
-            topic.custom_fields["transit_dep_sched_at"]
-        dep_time = begin
-          dep_time_str.is_a?(String) ? Time.parse(dep_time_str) : dep_time_str
-        rescue
-          nil
-        end
-        [topic, dep_time]
+      begin
+        dep_time = dep_time_str.is_a?(String) ? Time.parse(dep_time_str) : dep_time_str
+        dep_minutes = dep_time.hour * 60 + dep_time.min
+
+        # Check if within window (handles midnight wrap-around)
+        diff = (dep_minutes - current_minutes) % 1440 # minutes in a day
+        diff <= window_minutes
+      rescue
+        false
       end
-
-    # Filter to flights within time window
-    filtered_topics = topics_with_times.select do |_, time|
-      time && time >= time_window_start && time <= time_window_end
     end
-
-    sorted_topics = filtered_topics.sort_by { |_, time| time }.map(&:first)
 
     # Serialize departures
-    departures = sorted_topics.map { |topic| serialize_departure(topic) }
+    departures = filtered_topics.map { |topic| serialize_departure(topic) }
 
     render json: { departures: departures }
   end
